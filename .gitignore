@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Lab notebooks (per /ml-researcher discipline)
+ml-experiments/*
+!ml-experiments/.gitkeep
+!ml-experiments/README.md
+
+# Trained weights and intermediate checkpoints
+models/*.tflite
+models/*.h5
+models/*.pkl
+models/*.pt
+models/checkpoints/
+!models/.gitkeep
+
+# Downloaded / cached public datasets
+data/audioset/
+data/esc50/
+data/urbansound/
+data/cache/
+
+# YAMNet reference source + weights cache
+.yamnet_work/
+/tmp/yamnet_work/
+
+# Logs
+*.log
