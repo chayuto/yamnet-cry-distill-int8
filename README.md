@@ -23,16 +23,16 @@ Knowledge-distillation pipeline that turns Google's pretrained YAMNet (FP32, 521
 
 ## Performance
 
-Headline metric: held-out AudioSet `crying_sobbing` segment-level F1.
+Headline metric: held-out AudioSet `crying_sobbing` segment-level F1 (lands in EXP-003).
 
-| Experiment | Train data | Params | INT8 size | F1 | Precision | Recall |
-|---|---|---:|---:|---:|---:|---:|
-| EXP-001 (smoke) | 4 synth clips | 80,713 | ~80 KB | — | — | — |
-| EXP-002 (captures-only) | 475 | TBD | TBD | TBD | TBD | TBD |
-| EXP-003 (audioset-only) | TBD | TBD | TBD | TBD | TBD | TBD |
-| EXP-004 (combined) | TBD | TBD | TBD | TBD | TBD | TBD |
+| Experiment | Train data | Params | INT8 size | AudioSet F1 | Captures KL | Notes |
+|---|---|---:|---:|---:|---:|---|
+| EXP-001 (smoke) | 4 synth clips | 80,713 | ~80 KB | — | — | loop closes in 5 s |
+| EXP-002 (captures-only) | 475 captures | 80,713 | ~80 KB | — | **1.27** | KL fell 5.2× from random init |
+| EXP-003 (audioset-only) | TBD | TBD | TBD | TBD | — | Phase 3 |
+| EXP-004 (combined) | TBD | TBD | TBD | TBD | TBD | Phase 3 |
 
-Side metric (private in-domain): KL vs YAMNet on held-out home captures, time-stratified.
+Side metric: KL vs YAMNet on held-out home captures, time-stratified by (date, hour). Private — never published, never committed.
 
 ## Reproduce
 

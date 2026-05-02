@@ -1,0 +1,34 @@
+# EXP-002 — captures-only distillation, no AudioSet, no labels.
+#
+# Trains the DS-CNN student to mimic YAMNet's per-clip soft logits on
+# the 475 deployed-device captures. Held-out KL on a time-stratified
+# 20% split is the eval target. Captures stay private; this config is
+# the only artefact a stranger needs to see.
+
+experiment_id: EXP-002
+data:
+  source: home_captures
+  val_frac: 0.20
+  split_seed: 0
+  patches_per_clip: 4         # random per-epoch crops, 0.975s each
+
+train:
+  epochs: 50
+  batch_size: 32
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  shuffle_seed: 0
+
+loss:
+  kind: kl                    # KL(teacher_probs || student_probs)
+  epsilon: 1.0e-8
+
+eval:
+  every_n_epochs: 5
+  patch_strategy: centered    # deterministic 0.975s window from clip middle
+  metric: kl_per_clip
+
+checkpoint:
+  out_path: models/exp002_dscnn.h5   # gitignored
+  save_best_on: val_kl
