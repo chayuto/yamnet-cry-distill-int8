@@ -23,18 +23,20 @@ Knowledge-distillation pipeline that turns Google's pretrained YAMNet (FP32, 521
 
 ## Performance
 
-Headline metric: held-out AudioSet `crying_sobbing` segment-level F1 (lands in Phase 4 — EXP-005).
+Headline metric: held-out AudioSet `crying_sobbing` segment-level F1 / AUC on the 100-segment frozen test set (62 survivors after takedowns). Best-threshold F1 reported because distilled students inherit the teacher's diffuse softmax — see `docs/experiments/EXP-005_eval_harness.md`.
 
-Until then, KL divergence vs the YAMNet teacher on identical val pools (cross-eval, same evaluator across runs):
+| Experiment | Train data | Params | INT8 size | best-F1 | AUC | Captures KL |
+|---|---|---:|---:|---:|---:|---:|
+| EXP-001 (smoke) | 4 synth clips | 80,713 | — | — | — | — |
+| EXP-002 (captures-only) | 475 captures | 80,713 | ~80 KB* | 0.585 | 0.717 | **1.27** |
+| EXP-003 (audioset-only) | 413 segments | 80,713 | ~80 KB* | 0.612 | 0.750 | 2.66 |
+| EXP-004 (combined) | 380 caps + 413 segs | 80,713 | ~80 KB* | **0.667** | **0.823** | 1.41 |
 
-| Experiment | Train data | Params | Captures val KL | AudioSet val KL | Notes |
-|---|---|---:|---:|---:|---|
-| EXP-001 (smoke) | 4 synth clips | 80,713 | — | — | loop closes in 5 s |
-| EXP-002 (captures-only) | 475 captures | 80,713 | **1.27** | 6.62 | overfits to device acoustics |
-| EXP-003 (audioset-only) | 413 segments | 80,713 | 2.66 | 4.48 | public-data baseline |
-| EXP-004 (combined) | 380 caps + 413 segs | 80,713 | 1.41 | **3.99** | best generalist |
+\* INT8 size is the budget — actual quantization lands in Phase 5 (EXP-006).
 
-EXP-004 beats EXP-003 even on AudioSet's own held-out — captures act as soft regularization. Random init lands at ~7.3 nats KL on either pool, so all three runs are real signal. AudioSet survivor counts reflect 28.7 % YouTube-takedown attrition over the 830 curated segment IDs.
+**EXP-004 is the headline model**: combining captures with AudioSet beats AudioSet-alone on AudioSet's own held-out (AUC 0.823 vs 0.750), confirming captures act as soft regularization rather than just extra training mass.
+
+Side metric: KL vs YAMNet on held-out home captures (time-stratified). Private — disclosed only in the model card. The captures pool is the highest-confidence tier of the auto-ensemble's labels, so per-clip metrics don't translate to general nursery deployment without on-device threshold calibration.
 
 ## Reproduce
 

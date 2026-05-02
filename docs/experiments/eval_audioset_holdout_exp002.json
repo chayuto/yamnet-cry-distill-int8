@@ -1,0 +1,23 @@
+{
+  "threshold": 0.5,
+  "tp": 3,
+  "fp": 0,
+  "fn": 15,
+  "tn": 44,
+  "precision": 1.0,
+  "recall": 0.16666666666666666,
+  "f1": 0.2857142857142857,
+  "best_threshold": 0.18188654092189513,
+  "best_f1": 0.5853658536585366,
+  "best_precision": 0.5217391304347826,
+  "best_recall": 0.6666666666666666,
+  "auc": 0.7171717171717171,
+  "n_pos": 18,
+  "n_neg": 44,
+  "n_total": 62,
+  "skipped_dead": 38,
+  "skipped_missing": 0,
+  "n_evaluated": 62,
+  "model_path": "models/exp002_dscnn.h5",
+  "ids_csv": "data/ids/audioset_test.csv"
+}
