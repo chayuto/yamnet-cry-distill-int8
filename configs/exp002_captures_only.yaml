@@ -7,7 +7,7 @@
 
 experiment_id: EXP-002
 data:
-  source: home_captures
+  source: captures            # captures | audioset | mixed
   val_frac: 0.20
   split_seed: 0
   patches_per_clip: 4         # random per-epoch crops, 0.975s each

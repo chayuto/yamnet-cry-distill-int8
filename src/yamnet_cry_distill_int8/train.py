@@ -28,10 +28,9 @@ from .data.audioset import load_batch
 from .data.home_captures import (
     Capture,
     discover_captures,
-    load_centered_patch,
-    load_random_patch,
     time_stratified_split,
 )
+from .data.mixers import build_patch_pool
 from .student.dscnn import build_student
 from .teacher import PATCH_FRAMES, YAMNetTeacher
 
@@ -107,36 +106,24 @@ class CachedPatch:
     teacher_probs: np.ndarray
 
 
-def _build_cache(
+def _teacher_cache(
     teacher: YAMNetTeacher,
-    captures: list[Capture],
-    patches_per_clip: int,
-    seed: int,
+    patches: list[np.ndarray],
     label: str,
-    deterministic: bool = False,
 ) -> list[CachedPatch]:
-    rng = np.random.default_rng(seed)
     cache: list[CachedPatch] = []
     t0 = time.time()
-    for i, cap in enumerate(captures):
-        if deterministic:
-            wavs = [load_centered_patch(cap)]
-        else:
-            wavs = [load_random_patch(cap, rng) for _ in range(patches_per_clip)]
-        for wav in wavs:
-            scores, _, log_mel = teacher.forward(wav)
-            if log_mel.shape[0] < PATCH_FRAMES:
-                pad = PATCH_FRAMES - log_mel.shape[0]
-                log_mel = tf.pad(log_mel, [[0, pad], [0, 0]])
-            mel = log_mel[:PATCH_FRAMES, :].numpy()
-            probs = tf.reduce_mean(scores, axis=0).numpy()
-            cache.append(CachedPatch(mel=mel, teacher_probs=probs))
-        if (i + 1) % 50 == 0 or i == len(captures) - 1:
+    for i, wav in enumerate(patches):
+        scores, _, log_mel = teacher.forward(wav)
+        if log_mel.shape[0] < PATCH_FRAMES:
+            pad = PATCH_FRAMES - log_mel.shape[0]
+            log_mel = tf.pad(log_mel, [[0, pad], [0, 0]])
+        mel = log_mel[:PATCH_FRAMES, :].numpy()
+        probs = tf.reduce_mean(scores, axis=0).numpy()
+        cache.append(CachedPatch(mel=mel, teacher_probs=probs))
+        if (i + 1) % 200 == 0 or i == len(patches) - 1:
             elapsed = time.time() - t0
-            print(
-                f"  [{label}] {i + 1}/{len(captures)} clips, "
-                f"{len(cache)} patches, {elapsed:.1f}s"
-            )
+            print(f"  [{label}] {i + 1}/{len(patches)} patches in {elapsed:.1f}s")
     return cache
 
 
@@ -168,20 +155,42 @@ def run_experiment(args):
 
     tf.keras.utils.set_random_seed(cfg.get("data", {}).get("split_seed", 0))
 
-    # ----- data -----
-    captures = discover_captures()
-    if not captures:
-        raise SystemExit(
-            "No captures found. Set WS_ESP32_S3_CAM_ROOT to point at the "
-            "device-side repo, or place captures under "
-            "../ws-ESP32-S3-CAM/projects/cry-detect-01/logs/canonical/wavs/."
+    # ----- data: build patch pools per the data.source config -----
+    source = cfg["data"]["source"]
+    train_caps: list[Capture] = []
+    val_caps: list[Capture] = []
+    if source in ("captures", "mixed"):
+        captures = discover_captures()
+        if not captures:
+            raise SystemExit(
+                "No captures found. Set WS_ESP32_S3_CAM_ROOT or place "
+                "the deployed-device WAVs under "
+                "../ws-ESP32-S3-CAM/projects/cry-detect-01/logs/canonical/wavs/."
+            )
+        train_caps, val_caps = time_stratified_split(
+            captures,
+            val_frac=cfg["data"]["val_frac"],
+            seed=cfg["data"]["split_seed"],
         )
-    train_caps, val_caps = time_stratified_split(
-        captures,
-        val_frac=cfg["data"]["val_frac"],
-        seed=cfg["data"]["split_seed"],
+        print(
+            f"[train] {len(captures)} captures → "
+            f"train {len(train_caps)} / val {len(val_caps)}"
+        )
+
+    train_patches = build_patch_pool(
+        cfg["data"], captures=train_caps or None,
+        seed=cfg["train"]["shuffle_seed"], role="train",
     )
-    print(f"[train] {len(captures)} captures → train {len(train_caps)} / val {len(val_caps)}")
+    val_patches = build_patch_pool(
+        cfg["data"], captures=val_caps or None,
+        seed=0, role="val",
+    )
+    if not train_patches or not val_patches:
+        raise SystemExit(
+            f"empty patch pool: train={len(train_patches)} val={len(val_patches)}.  "
+            "Run scripts/download_audioset.py for AudioSet sources."
+        )
+    print(f"[train] patch pool: train={len(train_patches)} val={len(val_patches)}")
 
     # ----- teacher + student -----
     print("[train] loading YAMNet teacher...")
@@ -195,30 +204,15 @@ def run_experiment(args):
     )
 
     eps = float(cfg["loss"]["epsilon"])
-    patches_per_clip = int(cfg["data"]["patches_per_clip"])
     epochs = int(cfg["train"]["epochs"])
     batch_size = int(cfg["train"]["batch_size"])
 
     # ----- precompute teacher outputs once (frozen teacher → cache is stable) -----
-    print("[train] caching teacher outputs on train set...")
-    train_cache = _build_cache(
-        teacher,
-        train_caps,
-        patches_per_clip=patches_per_clip,
-        seed=cfg["train"]["shuffle_seed"],
-        label="train",
-        deterministic=False,
-    )
-    print("[train] caching teacher outputs on val set (centered patches)...")
-    val_cache = _build_cache(
-        teacher,
-        val_caps,
-        patches_per_clip=1,
-        seed=0,
-        label="val",
-        deterministic=True,
-    )
-    print(f"[train] cached: train={len(train_cache)} patches, val={len(val_cache)} patches")
+    print("[train] caching teacher outputs on train pool...")
+    train_cache = _teacher_cache(teacher, train_patches, label="train")
+    print("[train] caching teacher outputs on val pool...")
+    val_cache = _teacher_cache(teacher, val_patches, label="val")
+    print(f"[train] cached: train={len(train_cache)} val={len(val_cache)}")
 
     # ----- training loop -----
     history: list[dict] = []
@@ -275,6 +269,7 @@ def run_experiment(args):
         json.dumps(
             {
                 "experiment_id": cfg["experiment_id"],
+                "data_source": cfg["data"]["source"],
                 "n_train_captures": len(train_caps),
                 "n_val_captures": len(val_caps),
                 "n_train_patches": len(train_cache),

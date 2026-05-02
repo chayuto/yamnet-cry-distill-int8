@@ -1,0 +1,40 @@
+# EXP-004 — combined distillation: home captures + AudioSet.
+#
+# Hypothesis from the data audit: in-domain captures sharpen acoustic
+# bias toward the deployed environment, but AudioSet adds class
+# diversity (clean speech, silence, screams, babbling). The combined
+# pool should beat either source alone on AudioSet held-out.
+#
+# Prerequisite: scripts/download_audioset.py --all has populated cache.
+# WS_ESP32_S3_CAM_ROOT must point at the device-side repo for captures.
+
+experiment_id: EXP-004
+data:
+  source: mixed
+  val_frac: 0.20
+  split_seed: 0
+  patches_per_clip: 4
+  audioset_train_csv: data/ids/audioset_train.csv
+  audioset_val_csv:   data/ids/audioset_val.csv
+  audioset_patches_per_seg: 4
+
+train:
+  epochs: 50
+  batch_size: 32
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  shuffle_seed: 0
+
+loss:
+  kind: kl
+  epsilon: 1.0e-8
+
+eval:
+  every_n_epochs: 5
+  patch_strategy: centered
+  metric: kl_per_clip
+
+checkpoint:
+  out_path: models/exp004_dscnn.h5
+  save_best_on: val_kl

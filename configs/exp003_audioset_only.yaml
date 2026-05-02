@@ -1,0 +1,38 @@
+# EXP-003 — AudioSet-only distillation, the public-reproducibility surface.
+#
+# Headline experiment of the portfolio: trains the same DS-CNN student
+# entirely on AudioSet segments downloaded via scripts/download_audioset.py.
+# A stranger should be able to clone, install, run download_audioset.py,
+# then reproduce this number within ±2%.
+#
+# Prerequisite: `python scripts/download_audioset.py --all` has populated
+# data/audioset/cache/ with the 730 train+val WAVs (some segments will be
+# dead — yt-dlp marks them, the loader skips them).
+
+experiment_id: EXP-003
+data:
+  source: audioset
+  audioset_train_csv: data/ids/audioset_train.csv
+  audioset_val_csv:   data/ids/audioset_val.csv
+  audioset_patches_per_seg: 4
+
+train:
+  epochs: 50
+  batch_size: 32
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  shuffle_seed: 0
+
+loss:
+  kind: kl
+  epsilon: 1.0e-8
+
+eval:
+  every_n_epochs: 5
+  patch_strategy: centered
+  metric: kl_per_clip
+
+checkpoint:
+  out_path: models/exp003_dscnn.h5
+  save_best_on: val_kl
