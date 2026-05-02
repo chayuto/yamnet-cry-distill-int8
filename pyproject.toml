@@ -1,0 +1,41 @@
+[project]
+name = "yamnet-cry-distill-int8"
+version = "0.1.0"
+description = "Knowledge distillation: YAMNet FP32 (TF Hub) → tiny INT8 student for ESP32-S3 baby-cry detection."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "Chayut Orapinpatipat" }]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "librosa>=0.10",
+    "soundfile>=0.12",
+    "pyyaml>=6.0",
+    "tensorflow>=2.16",
+    "tensorflow-hub>=0.16",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+audioset = [
+    "yt-dlp>=2024.8.6",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100

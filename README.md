@@ -1,73 +1,61 @@
 # yamnet-cry-distill-int8
 
-Knowledge-distillation pipeline that turns Google's pretrained YAMNet
-(FP32, 521-class AudioSet) into a tiny INT8 student classifier targeted
-at on-device baby-cry detection on the Espressif ESP32-S3 (Waveshare
-ESP32-S3-CAM-GC2145).
+Knowledge-distillation pipeline that turns Google's pretrained YAMNet (FP32, 521-class AudioSet) into a tiny INT8 student classifier targeted at on-device baby-cry detection on the ESP32-S3.
 
-**Status:** in progress — no model shipped from this repo yet.
+**Status:** in progress — see [`docs/experiments/`](docs/experiments/) for the run log.
 
-## What this repo will do
+## Architecture
 
-1. Take YAMNet FP32 from TF Hub as the **teacher**.
-2. Generate per-frame soft targets (logits over the 21 cry-related
-   AudioSet classes plus a confounder bank).
-3. Train a small **student** (CRNN or DS-CNN, target ≤ 500 KB INT8)
-   on AudioSet baby-cry positives + ESC-50 / UrbanSound negatives,
-   plus private in-domain captures from the device repo.
-4. Headline eval: held-out AudioSet split. Side metric: leave-one-
-   session-out (LOSO) on home captures.
-5. Export to TFLite INT8 with representative-dataset calibration.
-6. Deploy on the ESP32-S3 via the device repo's `fetch_model.sh`.
+```
+[private home captures]   [public AudioSet IDs]
+        │                         │
+        ▼                         ▼
+   librosa mel ──► mixer ──► YAMNet teacher (FP32) ──► soft logits
+                              │                              │
+                              └──► tiny student (DS-CNN) ──► KL loss
+                                                              │
+                                              held-out AudioSet eval (HEADLINE)
+                                              held-out captures eval (side, private)
+                                                              │
+                                                              ▼
+                                                 INT8 TFLite ──► HF model hub
+```
 
-## Teacher already published
+## Performance
 
-The INT8-calibrated YAMNet that ships in the device repo today (with
-the documented mel-magnitude correction and double-sigmoid bug fixes)
-is at:
+Headline metric: held-out AudioSet `crying_sobbing` segment-level F1.
 
-  https://huggingface.co/chayuto/yamnet-mel-int8-tflm
+| Experiment | Train data | Params | INT8 size | F1 | Precision | Recall |
+|---|---|---:|---:|---:|---:|---:|
+| EXP-001 (smoke) | — | — | — | — | — | — |
+| EXP-002 (captures-only) | 475 | TBD | TBD | TBD | TBD | TBD |
+| EXP-003 (audioset-only) | TBD | TBD | TBD | TBD | TBD | TBD |
+| EXP-004 (combined) | TBD | TBD | TBD | TBD | TBD | TBD |
 
-This repo's eventual deliverable is a *distilled student* derived
-from that teacher — a different artifact, not a replacement.
+Side metric (private in-domain): KL vs YAMNet on held-out home captures, time-stratified.
 
-## Sibling repo
+## Reproduce
 
-The device-side firmware, audio harvesting, on-device inference, and
-the host-side auto-ensemble label pipeline live in the sibling repo
-`ws-ESP32-S3-CAM`. The boundary between the two repos is documented at
-`docs/research/repo-boundary-yamnet-cry-distill.md` in that repo.
+```bash
+git clone https://github.com/chayuto/yamnet-cry-distill-int8
+cd yamnet-cry-distill-int8
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,audioset]"
+pytest
+
+# Download the public AudioSet smoke set (50 segment IDs, ~2 minutes)
+python scripts/download_audioset.py --ids data/ids/audioset_smoke.csv
+
+# Phase-1 smoke test: prove the distillation loop closes
+bash scripts/run_exp001_smoke.sh
+```
+
+The full training pipeline reproduces against committed AudioSet segment IDs alone — no private data required.
 
 ## Privacy
 
-Raw audio captures live in `ws-ESP32-S3-CAM/datasets/` (gitignored on
-that side) and are read from there via filesystem path — they are
-never copied into this repo. Trained student weights are publishable
-only when the headline eval stands on public-data (AudioSet) on its
-own merits.
+The headline number is reproducible from public AudioSet segment IDs. A private in-domain corpus (deployed-device home captures) is used as **augmentation only** during distillation; it is never committed, uploaded to HuggingFace, or required for reproduction. See [`docs/architecture.md`](docs/architecture.md) and the [model card](docs/model_cards/yamnet-cry-distill-int8.md) for the public/private split.
 
-## Layout (target, not yet built out)
+## Sibling repo
 
-```
-yamnet-cry-distill-int8/
-├── README.md
-├── CLAUDE.md
-├── .gitignore
-├── .claude/commands/ml-researcher.md
-├── src/
-│   ├── teacher.py              # YAMNet FP32 from TF Hub (TBD)
-│   ├── student/                # tiny architectures (TBD)
-│   ├── data/                   # AudioSet / ESC-50 / UrbanSound / home captures (TBD)
-│   ├── train.py                # distillation loop (TBD)
-│   ├── eval.py                 # AudioSet held-out + LOSO captures (TBD)
-│   └── quantize/
-│       ├── __init__.py
-│       └── repTQ.py            # PTQ harness migrated from ws-ESP32-S3-CAM
-├── models/                     # output tflite + h5 (gitignored intermediates)
-├── ml-experiments/             # lab notebooks (gitignored)
-└── docs/                       # model cards, public-eligible notes
-```
-
-Most of `src/` does not exist yet — only `src/quantize/repTQ.py` is
-populated at scaffold time. The rest gets built as the experiment
-plan executes.
+Device firmware, audio harvest, on-device inference, and the host-side auto-ensemble label tooling live at [`ws-ESP32-S3-CAM`](https://github.com/chayuto/ws-ESP32-S3-CAM). The teacher artifact (`chayuto/yamnet-mel-int8-tflm`) was published from prior work in that repo.
