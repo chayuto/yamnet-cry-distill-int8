@@ -1,0 +1,20 @@
+{
+  "val_pool_sizes": {
+    "captures": 95,
+    "audioset": 117
+  },
+  "results": {
+    "EXP-002": {
+      "captures_val_kl": 1.2668302017215052,
+      "audioset_val_kl": 6.61456494168657
+    },
+    "EXP-003": {
+      "captures_val_kl": 2.6641658038146008,
+      "audioset_val_kl": 4.479727350430101
+    },
+    "EXP-004": {
+      "captures_val_kl": 1.4070673249661922,
+      "audioset_val_kl": 3.988641044905043
+    }
+  }
+}

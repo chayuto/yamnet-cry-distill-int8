@@ -23,16 +23,18 @@ Knowledge-distillation pipeline that turns Google's pretrained YAMNet (FP32, 521
 
 ## Performance
 
-Headline metric: held-out AudioSet `crying_sobbing` segment-level F1 (lands in EXP-003).
+Headline metric: held-out AudioSet `crying_sobbing` segment-level F1 (lands in Phase 4 — EXP-005).
 
-| Experiment | Train data | Params | INT8 size | AudioSet F1 | Captures KL | Notes |
-|---|---|---:|---:|---:|---:|---|
-| EXP-001 (smoke) | 4 synth clips | 80,713 | ~80 KB | — | — | loop closes in 5 s |
-| EXP-002 (captures-only) | 475 captures | 80,713 | ~80 KB | — | **1.27** | KL fell 5.2× from random init |
-| EXP-003 (audioset-only) | 570 segments curated | 80,713 | TBD | pending | — | infra ready, awaiting download |
-| EXP-004 (combined) | 570 + 475 | 80,713 | TBD | pending | TBD | infra ready, awaiting download |
+Until then, KL divergence vs the YAMNet teacher on identical val pools (cross-eval, same evaluator across runs):
 
-Side metric: KL vs YAMNet on held-out home captures, time-stratified by (date, hour). Private — never published, never committed.
+| Experiment | Train data | Params | Captures val KL | AudioSet val KL | Notes |
+|---|---|---:|---:|---:|---|
+| EXP-001 (smoke) | 4 synth clips | 80,713 | — | — | loop closes in 5 s |
+| EXP-002 (captures-only) | 475 captures | 80,713 | **1.27** | 6.62 | overfits to device acoustics |
+| EXP-003 (audioset-only) | 413 segments | 80,713 | 2.66 | 4.48 | public-data baseline |
+| EXP-004 (combined) | 380 caps + 413 segs | 80,713 | 1.41 | **3.99** | best generalist |
+
+EXP-004 beats EXP-003 even on AudioSet's own held-out — captures act as soft regularization. Random init lands at ~7.3 nats KL on either pool, so all three runs are real signal. AudioSet survivor counts reflect 28.7 % YouTube-takedown attrition over the 830 curated segment IDs.
 
 ## Reproduce
 
