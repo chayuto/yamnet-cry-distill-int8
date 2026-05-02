@@ -27,7 +27,7 @@ Headline metric: held-out AudioSet `crying_sobbing` segment-level F1.
 
 | Experiment | Train data | Params | INT8 size | F1 | Precision | Recall |
 |---|---|---:|---:|---:|---:|---:|
-| EXP-001 (smoke) | — | — | — | — | — | — |
+| EXP-001 (smoke) | 4 synth clips | 80,713 | ~80 KB | — | — | — |
 | EXP-002 (captures-only) | 475 | TBD | TBD | TBD | TBD | TBD |
 | EXP-003 (audioset-only) | TBD | TBD | TBD | TBD | TBD | TBD |
 | EXP-004 (combined) | TBD | TBD | TBD | TBD | TBD | TBD |
