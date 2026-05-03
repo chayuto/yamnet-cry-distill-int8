@@ -42,9 +42,43 @@ Headline metric: held-out AudioSet `crying_sobbing` segment-level F1 / AUC on th
 
 INT8 quantization cost is small (≤0.012 best-F1, ≤0.004 AUC). With 5-of-9 temporal voting at the operating threshold, the EXP-008 deployment math is **~5× fewer false alerts per night vs EXP-006** at the same recall.
 
-Captures-side side metric (KL vs YAMNet on home captures, time-stratified): private. Disclosed in the model card; not published as a load-bearing number because the captures pool is the highest-confidence tier of the auto-ensemble's labels and so leans easy.
+Side metric: KL vs YAMNet on held-out home captures (time-stratified, private). The captures pool is the highest-confidence tier of the auto-ensemble's labels, so per-clip metrics don't translate to general nursery deployment without on-device threshold calibration. Aggregate per-tier behaviour comparison (no captures-derived data published) is at [`docs/research/student-on-captures-summary-20260503.md`](docs/research/student-on-captures-summary-20260503.md).
 
-Side metric: KL vs YAMNet on held-out home captures (time-stratified). Private — disclosed only in the model card. The captures pool is the highest-confidence tier of the auto-ensemble's labels, so per-clip metrics don't translate to general nursery deployment without on-device threshold calibration.
+## Deployment profile (ESP32-S3)
+
+The published model is sized for real-time inference on the Waveshare ESP32-S3-CAM-GC2145 — 240 MHz dual-core Xtensa LX7, 8 MB PSRAM, 16 MB flash. Numbers below compare the v0.2.0 student to the YAMNet teacher running INT8 on the same device (sibling repo's [`chayuto/yamnet-mel-int8-tflm`](https://huggingface.co/chayuto/yamnet-mel-int8-tflm)), since that's the reference cry detector currently deployed.
+
+| | YAMNet teacher (INT8) | EXP-008 student (INT8) | ratio |
+|---|---:|---:|---:|
+| Flash footprint (`.tflite` size) | ~4.0 MB | **110 KB** | **36× smaller** |
+| Parameters | ~4.0 M | **80 713** | 50× smaller |
+| Tensor arena (PSRAM allocation) | ~600 KB | **~64 KB** est. | 9× smaller |
+| Inference latency / patch (CPU, training host) | ~2 ms | **<1 ms** measured | ~3× faster |
+| Inference latency / patch (ESP32-S3) | tens of ms | **single-digit ms** est. | ~10× faster |
+| Real-time headroom @ 0.48 s patch hop | ~10× | **~100×** est. | — |
+
+Student-on-ESP32-S3 latency is *estimated* until the on-device parallel-logging build lands (Phase A in the [firmware integration plan](https://github.com/chayuto/ws-ESP32-S3-CAM/blob/main/docs/research/student-integration-plan-20260503.md)).
+
+**Accuracy translation to deployment.** Three different lenses on the same model:
+
+| | what it measures | EXP-008 INT8 |
+|---|---|---:|
+| AudioSet test AUC | public-domain ranking quality on a frozen 62-segment slice | **0.866** |
+| AudioSet test best-F1 | binary-classification quality at the F1-optimal threshold | **0.744** |
+| Captures frame-correlation (high_pos) | how closely the student's per-frame cry score tracks the teacher's on the same audio | **r = 0.81** |
+| Captures student max (high_neg) | how often the student wrongly fires on quiet/silent audio (lower = better) | **0.06** (was 0.15 in EXP-006) |
+
+The student is a faithful approximator of the teacher on the deployment data — frame correlation 0.81 on high-confidence positives — and it is materially more conservative than v0.1.0 on quiet audio (high_neg max 0.15 → 0.06).
+
+**Calibration is per-deployment.** Distilled students inherit the teacher's diffuse softmax: cry probabilities concentrate well below 0.5 even on obvious cries. The model's best-F1 threshold is ≈0.05 on the AudioSet test, but the *right* operating point depends on the specific room, mic gain, and ambient noise floor. The detector firmware (`projects/cry-detect-01/main/detector.c` in the sibling repo) exposes threshold, N-of-M consecutive-frame voting, and hold-time hysteresis as runtime-configurable parameters — so a deployment-time calibration recipe of "record 10 min of ambient, set threshold = max(score) + 0.05" is sufficient.
+
+**Why distill at all if YAMNet already runs on-device?** Three things become possible with a 36× smaller model:
+
+- **~3.9 MB of flash and ~540 KB of PSRAM freed** for longer audio buffers (better temporal context), parallel image features from the on-board GC2145 camera, larger OTA partitions, or just less PSRAM pressure for the rest of the firmware.
+- **Lower power draw** on a battery-powered baby monitor — faster inference + smaller weight reads + fewer cache misses.
+- **Portability beyond ESP32-S3.** 110 KB INT8 fits on Cortex-M4, RP2040, ESP32-S2, and most TFLite-Micro targets where YAMNet's 4 MB does not.
+
+The deployment story is **not** "the student is more accurate than the teacher" — the teacher remains the reference. The story is "the student is *good enough* to recover most of the teacher's behaviour at a fraction of the resource cost, freeing the rest of the device for the rest of the product."
 
 ## Reproduce
 
