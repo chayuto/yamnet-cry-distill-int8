@@ -1,6 +1,6 @@
 [project]
 name = "yamnet-cry-distill-int8"
-version = "0.1.0"
+version = "0.2.0"
 description = "Knowledge distillation: YAMNet FP32 (TF Hub) → tiny INT8 student for ESP32-S3 baby-cry detection."
 readme = "README.md"
 license = { file = "LICENSE" }

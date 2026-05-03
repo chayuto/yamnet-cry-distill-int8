@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -37,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 HF_REPO_ID = "chayuto/yamnet-cry-distill-int8"
 
 
-def _build_bundle(staging: Path, exp: str) -> dict:
+def _build_bundle(staging: Path, exp: str, tag: str | None) -> dict:
     suffix = exp.replace("EXP-", "exp")  # EXP-006 -> exp006
     tflite_src = REPO_ROOT / "models" / f"{suffix}_dscnn.tflite"
     eval_src = REPO_ROOT / "docs" / "experiments" / f"eval_audioset_holdout_{suffix}_int8.json"
@@ -52,10 +53,23 @@ def _build_bundle(staging: Path, exp: str) -> dict:
     shutil.copy2(eval_src, staging / "eval_audioset_holdout_int8.json")
     shutil.copy2(card_src, staging / "README.md")  # HF model card lives at README.md
 
+    # Derive version string: prefer the --tag arg (stripped of leading 'v'),
+    # fall back to pyproject.toml's [project].version. Avoids the bug where
+    # config.json lied about the version because the upload script had a
+    # hardcoded "0.1.0" that was never bumped for v0.2.0.
+    version = (tag or "").lstrip("v")
+    if not version:
+        try:
+            pp = (REPO_ROOT / "pyproject.toml").read_text()
+            m = re.search(r'^version\s*=\s*"([^"]+)"', pp, flags=re.MULTILINE)
+            version = m.group(1) if m else "unknown"
+        except Exception:
+            version = "unknown"
+
     eval_data = json.loads(eval_src.read_text())
     config = {
         "model_name": "yamnet-cry-distill-int8",
-        "version": "0.1.0",
+        "version": version,
         "source_experiment": exp,
         "architecture": "DS-CNN (Conv stem + 4 depthwise-separable blocks + GAP + Dense-521)",
         "params": 80713,
@@ -154,7 +168,7 @@ def main() -> int:
 
     if args.staging.exists():
         shutil.rmtree(args.staging)
-    info = _build_bundle(args.staging, args.exp)
+    info = _build_bundle(args.staging, args.exp, args.tag)
     print(f"[upload] bundle:")
     for f in info["files"]:
         size = (args.staging / f).stat().st_size
