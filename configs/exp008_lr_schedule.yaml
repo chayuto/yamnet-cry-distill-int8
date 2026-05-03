@@ -1,0 +1,40 @@
+# EXP-008 — EXP-007 + LR drop schedule.
+#
+# EXP-007 plateaus around epoch 30-35 (train_kl 1.51 → 1.43, val_kl
+# 2.22 → 2.20).  Drop the learning rate to 1e-4 at epoch 30 to see if
+# fine-tuning at 10× lower LR closes the train/val gap.
+
+experiment_id: EXP-008
+data:
+  source: teacher_filtered
+  val_frac: 0.20
+  split_seed: 0
+  audioset_train_csv: data/ids/audioset_train.csv
+  audioset_val_csv:   data/ids/audioset_val.csv
+  pos_thr: 0.30
+  neg_thr: 0.05
+  per_epoch_resample: true
+  pos_neg_ratio: 3.0
+
+train:
+  epochs: 60                  # extended past the plateau
+  batch_size: 32
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  shuffle_seed: 0
+  lr_drop_at_epoch: 30
+  lr_drop_to: 0.0001          # 10× drop
+
+loss:
+  kind: kl
+  epsilon: 1.0e-8
+
+eval:
+  every_n_epochs: 5
+  patch_strategy: filtered
+  metric: kl_per_clip
+
+checkpoint:
+  out_path: models/exp008_dscnn.h5
+  save_best_on: val_kl

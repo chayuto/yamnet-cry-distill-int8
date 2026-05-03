@@ -326,7 +326,7 @@ def eval_home_captures(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp", choices=["EXP-002", "EXP-003", "EXP-004", "EXP-006"], action="append")
+    parser.add_argument("--exp", choices=["EXP-002", "EXP-003", "EXP-004", "EXP-006", "EXP-007", "EXP-008"], action="append")
     parser.add_argument("--all", action="store_true",
                         help="Run EXP-002, EXP-003, EXP-004 (the original baselines).")
     parser.add_argument("--ids", type=Path, default=Path("data/ids/audioset_test.csv"))

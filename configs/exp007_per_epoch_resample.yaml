@@ -1,0 +1,42 @@
+# EXP-007 — per-epoch patch resampling at 1:3 pos:neg ratio.
+#
+# EXP-006's filter scan produced 5 714 positives and 30 324 negatives.
+# That run subsampled to 5 714 / 5 714 (1:1) once, fixed across all 50
+# epochs.  This run keeps both pools intact and re-samples 5 714 pos +
+# 17 142 neg per epoch — the student sees ~all 30 K negatives over
+# 50 epochs and trains on a deployment-like 1:3 imbalance, which
+# should reduce the false-positive rate at the operating-point
+# threshold.
+
+experiment_id: EXP-007
+data:
+  source: teacher_filtered
+  val_frac: 0.20
+  split_seed: 0
+  audioset_train_csv: data/ids/audioset_train.csv
+  audioset_val_csv:   data/ids/audioset_val.csv
+  pos_thr: 0.30
+  neg_thr: 0.05
+  per_epoch_resample: true
+  pos_neg_ratio: 3.0          # 1 pos : 3 neg per epoch
+
+train:
+  epochs: 50
+  batch_size: 32
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  shuffle_seed: 0
+
+loss:
+  kind: kl
+  epsilon: 1.0e-8
+
+eval:
+  every_n_epochs: 5
+  patch_strategy: filtered
+  metric: kl_per_clip
+
+checkpoint:
+  out_path: models/exp007_dscnn.h5
+  save_best_on: val_kl

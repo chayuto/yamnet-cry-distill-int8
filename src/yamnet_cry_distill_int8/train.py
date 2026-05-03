@@ -192,20 +192,42 @@ def run_experiment(args):
     epochs = int(cfg["train"]["epochs"])
     batch_size = int(cfg["train"]["batch_size"])
 
+    train_pool: tuple[list, list] | None = None  # (pos, neg) when per-epoch
     if source == "teacher_filtered":
         pos_thr = float(cfg["data"].get("pos_thr", 0.30))
         neg_thr = float(cfg["data"].get("neg_thr", 0.05))
-        print(f"[train] teacher-filter mode: pos_thr={pos_thr} neg_thr={neg_thr}")
-        train_cache = patches_filtered_by_teacher(
-            teacher,
-            captures=train_caps or None,
-            audioset_csv=Path(cfg["data"].get("audioset_train_csv", "")) or None,
-            pos_thr=pos_thr,
-            neg_thr=neg_thr,
-            balance=True,
-            seed=cfg["train"]["shuffle_seed"],
-            label="train",
+        per_epoch = bool(cfg["data"].get("per_epoch_resample", False))
+        ratio = float(cfg["data"].get("pos_neg_ratio", 1.0))
+        print(
+            f"[train] teacher-filter mode: pos_thr={pos_thr} neg_thr={neg_thr} "
+            f"per_epoch={per_epoch} ratio=1:{ratio:g}"
         )
+        if per_epoch:
+            train_pool = patches_filtered_by_teacher(
+                teacher,
+                captures=train_caps or None,
+                audioset_csv=Path(cfg["data"].get("audioset_train_csv", "")) or None,
+                pos_thr=pos_thr,
+                neg_thr=neg_thr,
+                seed=cfg["train"]["shuffle_seed"],
+                label="train",
+                return_separate=True,
+            )
+            print(
+                f"[train] per-epoch pools: pos={len(train_pool[0])} neg={len(train_pool[1])}"
+            )
+            train_cache = []  # filled in below per epoch
+        else:
+            train_cache = patches_filtered_by_teacher(
+                teacher,
+                captures=train_caps or None,
+                audioset_csv=Path(cfg["data"].get("audioset_train_csv", "")) or None,
+                pos_thr=pos_thr,
+                neg_thr=neg_thr,
+                balance=ratio,
+                seed=cfg["train"]["shuffle_seed"],
+                label="train",
+            )
         val_cache = patches_filtered_by_teacher(
             teacher,
             captures=val_caps or None,
@@ -236,11 +258,17 @@ def run_experiment(args):
         print("[train] caching teacher outputs on val pool...")
         val_cache = _teacher_cache(teacher, val_patches, label="val")
 
-    if not train_cache or not val_cache:
+    if (train_pool is None and not train_cache) or not val_cache:
         raise SystemExit(
             f"empty cache: train={len(train_cache)} val={len(val_cache)}"
         )
-    print(f"[train] cached: train={len(train_cache)} val={len(val_cache)}")
+    if train_pool is None:
+        print(f"[train] cached: train={len(train_cache)} val={len(val_cache)}")
+    else:
+        print(
+            f"[train] per-epoch pool: pos={len(train_pool[0])} neg={len(train_pool[1])} "
+            f"val={len(val_cache)}"
+        )
 
     # ----- training loop -----
     history: list[dict] = []
@@ -255,8 +283,21 @@ def run_experiment(args):
     rng = np.random.default_rng(cfg["train"]["shuffle_seed"])
 
     eval_every = int(cfg["eval"].get("every_n_epochs", 5))
+    pos_neg_ratio = float(cfg["data"].get("pos_neg_ratio", 1.0))
+    lr_drop_at = int(cfg["train"].get("lr_drop_at_epoch", 0))
+    lr_drop_to = float(cfg["train"].get("lr_drop_to", 0.0))
 
     for epoch in range(1, epochs + 1):
+        if train_pool is not None:
+            pos, neg = train_pool
+            n_pos = len(pos)
+            n_neg_target = min(len(neg), int(round(n_pos * pos_neg_ratio)))
+            pos_idx = rng.permutation(len(pos))[:n_pos]
+            neg_idx = rng.permutation(len(neg))[:n_neg_target]
+            train_cache = [pos[j] for j in pos_idx] + [neg[j] for j in neg_idx]
+        if lr_drop_at > 0 and epoch == lr_drop_at:
+            print(f"[train] dropping LR to {lr_drop_to} at epoch {epoch}")
+            optimizer.learning_rate.assign(lr_drop_to)
         idx = rng.permutation(len(train_cache))
         epoch_loss = 0.0
         n_batches = 0

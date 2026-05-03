@@ -25,15 +25,22 @@ Knowledge-distillation pipeline that turns Google's pretrained YAMNet (FP32, 521
 
 Headline metric: held-out AudioSet `crying_sobbing` segment-level F1 / AUC on the 100-segment frozen test set (62 survivors after takedowns). Best-threshold F1 reported because distilled students inherit the teacher's diffuse softmax — see `docs/experiments/EXP-005_eval_harness.md`.
 
-| Experiment | Train data prep | Params | INT8 size | best-F1 | AUC |
-|---|---|---:|---:|---:|---:|
-| EXP-001 (smoke) | synthetic | 80,713 | — | — | — |
-| EXP-002 (captures-only) | random 4 windows / clip | 80,713 | — | 0.585 | 0.717 |
-| EXP-003 (audioset-only) | random 4 windows / clip | 80,713 | — | 0.612 | 0.750 |
-| EXP-004 (combined) | random 4 windows / clip | 80,713 | — | 0.667 | 0.823 |
-| **EXP-006 (combined + teacher-filter)** | **teacher-scored sliding window** | 80,713 | **110 KB** | **0.696** | **0.860** |
+| Experiment | Train data prep | Params | INT8 size | best-F1 | AUC | FPR (best thr) |
+|---|---|---:|---:|---:|---:|---:|
+| EXP-001 (smoke) | synthetic | 80,713 | — | — | — | — |
+| EXP-002 (captures-only) | random 4 windows / clip | 80,713 | — | 0.585 | 0.717 | — |
+| EXP-003 (audioset-only) | random 4 windows / clip | 80,713 | — | 0.612 | 0.750 | — |
+| EXP-004 (combined) | random 4 windows / clip | 80,713 | — | 0.667 | 0.823 | — |
+| EXP-006 (v0.1.0) | teacher-scored sliding window, 1:1 fixed pool | 80,713 | 110 KB | 0.696 | 0.860 | 31.8 % |
+| EXP-007 | + per-epoch resample, 1:3 pos:neg | 80,713 | — | 0.756 | 0.861 | 22.7 % |
+| **EXP-008 (v0.2.0)** | **+ LR drop 1e-3→1e-4 @ epoch 30** | 80,713 | **110 KB** | **0.756** | **0.870** | **22.7 %** |
 
-**EXP-006 is the published model.** The teacher-as-filter pipeline shift (running YAMNet across every clip first, keeping only windows with `p_cry > 0.30` as positives and `p_cry < 0.05` as hard negatives) added **+0.037 AUC** over the random-window baseline. INT8 quantization cost zero at reported precision. See [`docs/research/methodology-teacher-as-filter.md`](docs/research/methodology-teacher-as-filter.md).
+**EXP-008 is the published model (v0.2.0).** Two key methodology shifts:
+
+1. **EXP-006 — teacher-as-filter** (+0.037 AUC over random-window baseline). YAMNet pre-scores every 0.5 s-hop window of every clip; only confident-positive (`p_cry > 0.30`) and confident-negative (`p_cry < 0.05`) windows enter training. See [`docs/research/methodology-teacher-as-filter.md`](docs/research/methodology-teacher-as-filter.md).
+2. **EXP-007–008 — deployment-realism training** (-9 pp FPR at the operating point). 1:3 pos:neg ratio matches deployment audio better than 1:1; per-epoch random subsampling exposes the student to ~all 30 K negatives over training instead of the same 5 714 every epoch.
+
+INT8 quantization cost is small (≤0.012 best-F1, ≤0.004 AUC). With 5-of-9 temporal voting at the operating threshold, the EXP-008 deployment math is **~5× fewer false alerts per night vs EXP-006** at the same recall.
 
 Captures-side side metric (KL vs YAMNet on home captures, time-stratified): private. Disclosed in the model card; not published as a load-bearing number because the captures pool is the highest-confidence tier of the auto-ensemble's labels and so leans easy.
 

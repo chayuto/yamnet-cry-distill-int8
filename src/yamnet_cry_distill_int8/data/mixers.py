@@ -182,18 +182,29 @@ def patches_filtered_by_teacher(
     audioset_cache: Path = DEFAULT_CACHE_DIR,
     pos_thr: float = 0.30,
     neg_thr: float = 0.05,
-    balance: bool = True,
+    balance: bool | float = True,
     seed: int = 0,
     label: str = "train",
-) -> list[CachedPatch]:
+    return_separate: bool = False,
+) -> list[CachedPatch] | tuple[list[CachedPatch], list[CachedPatch]]:
     """Run the teacher across full clips with sliding windows, bin into
-    positive/negative pools by cry-score, balance, and return the
-    combined pool ready for distillation training.
+    positive/negative pools by cry-score, balance, and return the pool
+    ready for distillation training.
 
     Clip-level labels are not consulted — the teacher's per-window
     `p_cry = softmax(scores)[19] + softmax(scores)[20]` is the sole
     selection signal. See
     `docs/research/methodology-teacher-as-filter.md`.
+
+    `balance`:
+        - True or 1.0 → pos:neg = 1:1 (subsample the larger pool)
+        - float r → pos:neg = 1:r (e.g. 3.0 → train at 1 pos for every 3 neg)
+        - False → no balancing, return everything
+
+    `return_separate`:
+        False (default) → returns combined balanced list (legacy EXP-006)
+        True            → returns (pos_list, neg_list) — caller balances
+                          per epoch (EXP-007 onward)
     """
     pos_all: list[CachedPatch] = []
     neg_all: list[CachedPatch] = []
@@ -257,16 +268,27 @@ def patches_filtered_by_teacher(
         f"  [filter total {label}] pos={len(pos_all)} neg={len(neg_all)}"
     )
 
+    if return_separate:
+        return pos_all, neg_all
+
     if balance and pos_all and neg_all:
         rng = np.random.default_rng(seed)
-        n = min(len(pos_all), len(neg_all))
-        if len(pos_all) > n:
-            idx = rng.permutation(len(pos_all))[:n]
-            pos_all = [pos_all[j] for j in idx]
-        if len(neg_all) > n:
-            idx = rng.permutation(len(neg_all))[:n]
+        ratio = 1.0 if balance is True else float(balance)
+        n_pos = len(pos_all)
+        n_neg_target = int(round(n_pos * ratio))
+        if n_pos > len(neg_all) / max(ratio, 1e-9):
+            n_pos = int(len(neg_all) / ratio) if ratio > 0 else len(neg_all)
+        if len(neg_all) > n_neg_target:
+            idx = rng.permutation(len(neg_all))[:n_neg_target]
             neg_all = [neg_all[j] for j in idx]
-        print(f"  [filter balanced {label}] {n} pos / {n} neg = {2 * n} total")
+        if len(pos_all) > n_pos:
+            idx = rng.permutation(len(pos_all))[:n_pos]
+            pos_all = [pos_all[j] for j in idx]
+        print(
+            f"  [filter balanced {label} 1:{ratio:g}] "
+            f"{len(pos_all)} pos / {len(neg_all)} neg = "
+            f"{len(pos_all) + len(neg_all)} total"
+        )
 
     return pos_all + neg_all
 

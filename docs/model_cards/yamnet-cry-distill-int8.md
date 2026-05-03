@@ -26,7 +26,9 @@ pipeline_tag: audio-classification
 
 A tiny INT8 TFLite student distilled from Google's YAMNet for on-device baby-cry detection on the Espressif ESP32-S3.
 
-**Tag:** `v0.1.0`. Source pipeline: [chayuto/yamnet-cry-distill-int8](https://github.com/chayuto/yamnet-cry-distill-int8). Sibling firmware: [chayuto/ws-ESP32-S3-CAM](https://github.com/chayuto/ws-ESP32-S3-CAM).
+**Tag:** `v0.2.0`. Source pipeline: [chayuto/yamnet-cry-distill-int8](https://github.com/chayuto/yamnet-cry-distill-int8). Sibling firmware: [chayuto/ws-ESP32-S3-CAM](https://github.com/chayuto/ws-ESP32-S3-CAM).
+
+**v0.2.0 changes vs v0.1.0:** trained at 1:3 pos:neg ratio with per-epoch random negative resampling and a learning-rate drop at epoch 30. Same student architecture, same INT8 size. Best-F1 lifted from 0.696 to 0.756 and FPR at the operating threshold dropped from 31.8 % to 22.7 % — material improvement in deployment-relevant terms. See [`docs/experiments/EXP-007_per_epoch_resample.md`](https://github.com/chayuto/yamnet-cry-distill-int8/blob/main/docs/experiments/EXP-007_per_epoch_resample.md) and [`docs/experiments/EXP-008_lr_schedule.md`](https://github.com/chayuto/yamnet-cry-distill-int8/blob/main/docs/experiments/EXP-008_lr_schedule.md).
 
 ## Model description
 
@@ -50,13 +52,19 @@ Cry-positive score = student softmax probability mass on YAMNet classes 19 (`Cry
 
 | | best F1 | best threshold | precision | recall | AUC | F1 @ 0.5 |
 |---|---:|---:|---:|---:|---:|---:|
-| FP32 student (EXP-006 source) | 0.696 | 0.096 | 0.552 | 0.944 | 0.860 | 0.286 |
-| **INT8 quantized (this artifact)** | **0.696** | **0.096** | **0.552** | **0.944** | **0.860** | **0.286** |
-| Δ from quantization | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| FP32 student (EXP-008 source) | 0.756 | 0.047 | 0.630 | 0.944 | 0.870 | 0.286 |
+| **INT8 quantized (this artifact)** | **0.744** | **0.047** | — | — | **0.866** | **0.286** |
+| Δ from quantization | -0.012 | 0.000 | — | — | -0.004 | 0.000 |
 
-INT8 quantization cost was **zero** at the reported precision — the 80 K student is small enough that representative-dataset calibration captures the activation distributions exactly. The model retains 94 % cry recall at its calibrated threshold.
+INT8 quantization cost was small — 0.012 best-F1 and 0.004 AUC, well under the ≤0.02 AUC budget. The model retains 94 % cry recall at its calibrated threshold.
 
-**Pipeline-evolution context.** Earlier baselines used naïve random sub-window sampling (4 random 0.96 s patches per 40 s capture). EXP-006 introduces *teacher-as-filter* — running YAMNet across every 0.4875 s-hop window of every clip first, then training only on patches the teacher confidently scores positive (`p_cry > 0.30`) or confidently scores negative (`p_cry < 0.05`). See [`docs/research/methodology-teacher-as-filter.md`](https://github.com/chayuto/yamnet-cry-distill-int8/blob/main/docs/research/methodology-teacher-as-filter.md). Result: +0.037 AUC and 3× sharper threshold over the random-window baseline (EXP-004 → EXP-006).
+At the best-F1 threshold (≈0.05), the FP32 model lands **17 of 18 cries caught (94 % recall)** with **63 % precision** on a balanced 18-pos / 44-neg AudioSet test slice. False-positive rate at this operating point is **22.7 %** vs v0.1.0's 31.8 % — a 9-percentage-point reduction (-29 % relative) at the same recall.
+
+**Pipeline-evolution context — three methodology shifts that earned this artifact:**
+
+1. **EXP-006 — teacher-as-filter** (+0.037 AUC over random-window baseline). YAMNet pre-scores every 0.4875 s-hop window of every clip; only confident-positive (`p_cry > 0.30`) and confident-negative (`p_cry < 0.05`) windows enter training. See [`docs/research/methodology-teacher-as-filter.md`](https://github.com/chayuto/yamnet-cry-distill-int8/blob/main/docs/research/methodology-teacher-as-filter.md).
+2. **EXP-007 — 1:3 pos:neg ratio + per-epoch negative resampling** (+0.060 best-F1, -9 pp FPR at operating threshold). Training at deployment-realistic class ratios pushed the operating point materially without sacrificing AUC.
+3. **EXP-008 — LR drop at epoch 30** (+0.009 AUC). Fine-tuning at 10× lower learning rate after the loss plateau closed the train/val gap modestly.
 
 **Threshold note:** distilled students inherit the teacher's diffuse softmax — cry probabilities concentrate below 0.5 even on obvious cries — so the operating-point threshold (~0.10) is well below the naïve 0.5. Deployments should calibrate per-device with a short on-site recording session.
 
