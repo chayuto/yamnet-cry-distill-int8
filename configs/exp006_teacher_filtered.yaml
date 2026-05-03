@@ -1,0 +1,42 @@
+# EXP-006 — teacher-as-filter: window-level pseudo-labeling.
+#
+# The first FOUR experiments (EXP-002 through EXP-004) randomly sampled
+# 4 windows per 40-second capture.  Most of those windows were not
+# actually cry — the clip-level labels covered ~15-20% of clip duration
+# at best.  See docs/research/methodology-teacher-as-filter.md.
+#
+# This run runs the teacher across every 0.4875 s-hop window of every
+# clip, bins by p_cry = softmax[19] + softmax[20], keeps only the
+# high-confidence positive (>0.30) and clean-negative (<0.05) bins,
+# then balances pos:neg 1:1.
+
+experiment_id: EXP-006
+data:
+  source: teacher_filtered
+  val_frac: 0.20
+  split_seed: 0
+  audioset_train_csv: data/ids/audioset_train.csv
+  audioset_val_csv:   data/ids/audioset_val.csv
+  pos_thr: 0.30
+  neg_thr: 0.05
+
+train:
+  epochs: 50
+  batch_size: 32
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  shuffle_seed: 0
+
+loss:
+  kind: kl
+  epsilon: 1.0e-8
+
+eval:
+  every_n_epochs: 5
+  patch_strategy: filtered
+  metric: kl_per_clip
+
+checkpoint:
+  out_path: models/exp006_dscnn.h5
+  save_best_on: val_kl

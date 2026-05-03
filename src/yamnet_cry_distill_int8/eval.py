@@ -80,14 +80,43 @@ def _patches_from_clip(audio: np.ndarray) -> np.ndarray:
     return np.stack([audio[s : s + PATCH_SAMPLES] for s in starts])
 
 
+def _load_student(model_path: Path):
+    """Returns a `predict(mel_fp32)` callable handling either Keras (.h5)
+    or TFLite (.tflite) checkpoints. Float32 logits in/out — input mel
+    has shape (1, 96, 64, 1)."""
+    p = str(model_path)
+    if p.endswith(".tflite"):
+        interp = tf.lite.Interpreter(model_path=p)
+        interp.allocate_tensors()
+        in_det = interp.get_input_details()[0]
+        out_det = interp.get_output_details()[0]
+        in_scale, in_zp = in_det["quantization"]
+        out_scale, out_zp = out_det["quantization"]
+
+        def predict(mel_fp32: np.ndarray) -> np.ndarray:
+            x = np.clip(
+                np.round(mel_fp32 / in_scale + in_zp), -128, 127
+            ).astype(np.int8)
+            interp.set_tensor(in_det["index"], x)
+            interp.invoke()
+            raw = interp.get_tensor(out_det["index"])
+            return (raw.astype(np.float32) - out_zp) * out_scale
+
+        return predict, "tflite_int8"
+
+    keras = tf.keras.models.load_model(p, compile=False)
+
+    def predict(mel_fp32: np.ndarray) -> np.ndarray:
+        return keras(mel_fp32, training=False).numpy()
+
+    return predict, "keras_fp32"
+
+
 def _student_cry_score_per_clip(
-    student: tf.keras.Model,
+    student_predict,
     teacher: YAMNetTeacher,
     audio: np.ndarray,
 ) -> float:
-    """For each 0.96 s window of the clip, run teacher to get the log-mel
-    patch (the student's actual input) and student to get cry probability;
-    return the mean cry probability across windows."""
     patches = _patches_from_clip(audio)
     cry_scores = []
     for wav in patches:
@@ -95,8 +124,11 @@ def _student_cry_score_per_clip(
         if log_mel.shape[0] < PATCH_FRAMES:
             log_mel = tf.pad(log_mel, [[0, PATCH_FRAMES - log_mel.shape[0]], [0, 0]])
         mel = log_mel[:PATCH_FRAMES, :].numpy()
-        logits = student(mel[None, ..., None].astype(np.float32), training=False)
-        probs = tf.nn.softmax(logits[0]).numpy()
+        logits = student_predict(mel[None, ..., None].astype(np.float32))
+        # softmax in fp64 to keep numeric stability for tiny tflite logits
+        x = logits[0].astype(np.float64)
+        x -= x.max()
+        probs = np.exp(x) / np.exp(x).sum()
         cry_scores.append(float(probs[CRY_CLASS_IDXS[0]] + probs[CRY_CLASS_IDXS[1]]))
     return float(np.mean(cry_scores))
 
@@ -173,7 +205,7 @@ def eval_audioset_holdout(
 ) -> dict:
     rows = read_segments_csv(ids_csv)
     teacher = YAMNetTeacher()
-    student = tf.keras.models.load_model(str(model_path), compile=False)
+    student_predict, backend = _load_student(model_path)
 
     scores: list[float] = []
     y_true: list[int] = []
@@ -189,7 +221,7 @@ def eval_audioset_holdout(
             else:
                 skipped["missing"] += 1
             continue
-        score = _student_cry_score_per_clip(student, teacher, audio)
+        score = _student_cry_score_per_clip(student_predict, teacher, audio)
         is_cry = bool(set(r["positive_labels"].split(",")) & CRY_MIDS)
         scores.append(score)
         y_true.append(int(is_cry))
@@ -202,6 +234,7 @@ def eval_audioset_holdout(
     metrics["skipped_dead"] = skipped["dead"]
     metrics["skipped_missing"] = skipped["missing"]
     metrics["n_evaluated"] = int(len(s))
+    metrics["backend"] = backend
     metrics["model_path"] = _rel(model_path)
     metrics["ids_csv"] = _rel(ids_csv)
     return metrics
@@ -234,7 +267,7 @@ def eval_home_captures(
         return {"error": f"missing {master_csv} or {canonical}"}
 
     teacher = YAMNetTeacher()
-    student = tf.keras.models.load_model(str(model_path), compile=False)
+    student_predict, backend = _load_student(model_path)
     rows = _read_master_csv(master_csv)
     by_file = {r["capture_file"]: r for r in rows}
 
@@ -256,7 +289,7 @@ def eval_home_captures(
         if audio is None:
             n_skipped += 1
             continue
-        score = _student_cry_score_per_clip(student, teacher, audio)
+        score = _student_cry_score_per_clip(student_predict, teacher, audio)
         scores.append(score)
         y_true.append(1 if tier == "high_pos" else 0)
         ts_iso = meta.get("ts_iso", "")
@@ -293,12 +326,15 @@ def eval_home_captures(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp", choices=["EXP-002", "EXP-003", "EXP-004"], action="append")
-    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--exp", choices=["EXP-002", "EXP-003", "EXP-004", "EXP-006"], action="append")
+    parser.add_argument("--all", action="store_true",
+                        help="Run EXP-002, EXP-003, EXP-004 (the original baselines).")
     parser.add_argument("--ids", type=Path, default=Path("data/ids/audioset_test.csv"))
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--captures", action="store_true",
                         help="Also run the captures-side side metric.")
+    parser.add_argument("--tflite", action="store_true",
+                        help="Use the .tflite checkpoint for the chosen --exp(s).")
     args = parser.parse_args()
 
     if args.all:
@@ -311,10 +347,13 @@ def main() -> int:
     docs_dir = REPO_ROOT / "docs" / "experiments"
     for exp in exps:
         suffix = exp.replace("EXP-", "exp")  # e.g. EXP-002 -> exp002
-        model_path = REPO_ROOT / "models" / f"{suffix}_dscnn.h5"
+        ext = ".tflite" if args.tflite else ".h5"
+        suffix_out = f"{suffix}_int8" if args.tflite else suffix
+        model_path = REPO_ROOT / "models" / f"{suffix}_dscnn{ext}"
         if not model_path.exists():
             print(f"[{exp}] no checkpoint at {model_path}, skipping")
             continue
+        suffix = suffix_out
         print(f"[{exp}] AudioSet held-out eval: {args.ids}")
         m = eval_audioset_holdout(model_path, args.ids, threshold=args.threshold)
         print(

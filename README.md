@@ -25,16 +25,17 @@ Knowledge-distillation pipeline that turns Google's pretrained YAMNet (FP32, 521
 
 Headline metric: held-out AudioSet `crying_sobbing` segment-level F1 / AUC on the 100-segment frozen test set (62 survivors after takedowns). Best-threshold F1 reported because distilled students inherit the teacher's diffuse softmax — see `docs/experiments/EXP-005_eval_harness.md`.
 
-| Experiment | Train data | Params | INT8 size | best-F1 | AUC | Captures KL |
-|---|---|---:|---:|---:|---:|---:|
-| EXP-001 (smoke) | 4 synth clips | 80,713 | — | — | — | — |
-| EXP-002 (captures-only) | 475 captures | 80,713 | ~80 KB* | 0.585 | 0.717 | **1.27** |
-| EXP-003 (audioset-only) | 413 segments | 80,713 | ~80 KB* | 0.612 | 0.750 | 2.66 |
-| EXP-004 (combined) | 380 caps + 413 segs | 80,713 | ~80 KB* | **0.667** | **0.823** | 1.41 |
+| Experiment | Train data prep | Params | INT8 size | best-F1 | AUC |
+|---|---|---:|---:|---:|---:|
+| EXP-001 (smoke) | synthetic | 80,713 | — | — | — |
+| EXP-002 (captures-only) | random 4 windows / clip | 80,713 | — | 0.585 | 0.717 |
+| EXP-003 (audioset-only) | random 4 windows / clip | 80,713 | — | 0.612 | 0.750 |
+| EXP-004 (combined) | random 4 windows / clip | 80,713 | — | 0.667 | 0.823 |
+| **EXP-006 (combined + teacher-filter)** | **teacher-scored sliding window** | 80,713 | **110 KB** | **0.696** | **0.860** |
 
-\* INT8 size is the budget — actual quantization lands in Phase 5 (EXP-006).
+**EXP-006 is the published model.** The teacher-as-filter pipeline shift (running YAMNet across every clip first, keeping only windows with `p_cry > 0.30` as positives and `p_cry < 0.05` as hard negatives) added **+0.037 AUC** over the random-window baseline. INT8 quantization cost zero at reported precision. See [`docs/research/methodology-teacher-as-filter.md`](docs/research/methodology-teacher-as-filter.md).
 
-**EXP-004 is the headline model**: combining captures with AudioSet beats AudioSet-alone on AudioSet's own held-out (AUC 0.823 vs 0.750), confirming captures act as soft regularization rather than just extra training mass.
+Captures-side side metric (KL vs YAMNet on home captures, time-stratified): private. Disclosed in the model card; not published as a load-bearing number because the captures pool is the highest-confidence tier of the auto-ensemble's labels and so leans easy.
 
 Side metric: KL vs YAMNet on held-out home captures (time-stratified). Private — disclosed only in the model card. The captures pool is the highest-confidence tier of the auto-ensemble's labels, so per-clip metrics don't translate to general nursery deployment without on-device threshold calibration.
 

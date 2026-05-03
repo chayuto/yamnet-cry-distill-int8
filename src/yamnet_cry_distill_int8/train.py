@@ -30,7 +30,7 @@ from .data.home_captures import (
     discover_captures,
     time_stratified_split,
 )
-from .data.mixers import build_patch_pool
+from .data.mixers import build_patch_pool, patches_filtered_by_teacher
 from .student.dscnn import build_student
 from .teacher import PATCH_FRAMES, YAMNetTeacher
 
@@ -159,7 +159,7 @@ def run_experiment(args):
     source = cfg["data"]["source"]
     train_caps: list[Capture] = []
     val_caps: list[Capture] = []
-    if source in ("captures", "mixed"):
+    if source in ("captures", "mixed", "teacher_filtered"):
         captures = discover_captures()
         if not captures:
             raise SystemExit(
@@ -177,22 +177,7 @@ def run_experiment(args):
             f"train {len(train_caps)} / val {len(val_caps)}"
         )
 
-    train_patches = build_patch_pool(
-        cfg["data"], captures=train_caps or None,
-        seed=cfg["train"]["shuffle_seed"], role="train",
-    )
-    val_patches = build_patch_pool(
-        cfg["data"], captures=val_caps or None,
-        seed=0, role="val",
-    )
-    if not train_patches or not val_patches:
-        raise SystemExit(
-            f"empty patch pool: train={len(train_patches)} val={len(val_patches)}.  "
-            "Run scripts/download_audioset.py for AudioSet sources."
-        )
-    print(f"[train] patch pool: train={len(train_patches)} val={len(val_patches)}")
-
-    # ----- teacher + student -----
+    # ----- teacher (needed early for the filtered path) -----
     print("[train] loading YAMNet teacher...")
     teacher = YAMNetTeacher()
     student = build_student()
@@ -207,11 +192,54 @@ def run_experiment(args):
     epochs = int(cfg["train"]["epochs"])
     batch_size = int(cfg["train"]["batch_size"])
 
-    # ----- precompute teacher outputs once (frozen teacher → cache is stable) -----
-    print("[train] caching teacher outputs on train pool...")
-    train_cache = _teacher_cache(teacher, train_patches, label="train")
-    print("[train] caching teacher outputs on val pool...")
-    val_cache = _teacher_cache(teacher, val_patches, label="val")
+    if source == "teacher_filtered":
+        pos_thr = float(cfg["data"].get("pos_thr", 0.30))
+        neg_thr = float(cfg["data"].get("neg_thr", 0.05))
+        print(f"[train] teacher-filter mode: pos_thr={pos_thr} neg_thr={neg_thr}")
+        train_cache = patches_filtered_by_teacher(
+            teacher,
+            captures=train_caps or None,
+            audioset_csv=Path(cfg["data"].get("audioset_train_csv", "")) or None,
+            pos_thr=pos_thr,
+            neg_thr=neg_thr,
+            balance=True,
+            seed=cfg["train"]["shuffle_seed"],
+            label="train",
+        )
+        val_cache = patches_filtered_by_teacher(
+            teacher,
+            captures=val_caps or None,
+            audioset_csv=Path(cfg["data"].get("audioset_val_csv", "")) or None,
+            pos_thr=pos_thr,
+            neg_thr=neg_thr,
+            balance=True,
+            seed=0,
+            label="val",
+        )
+    else:
+        train_patches = build_patch_pool(
+            cfg["data"], captures=train_caps or None,
+            seed=cfg["train"]["shuffle_seed"], role="train",
+        )
+        val_patches = build_patch_pool(
+            cfg["data"], captures=val_caps or None,
+            seed=0, role="val",
+        )
+        if not train_patches or not val_patches:
+            raise SystemExit(
+                f"empty patch pool: train={len(train_patches)} val={len(val_patches)}.  "
+                "Run scripts/download_audioset.py for AudioSet sources."
+            )
+        print(f"[train] patch pool: train={len(train_patches)} val={len(val_patches)}")
+        print("[train] caching teacher outputs on train pool...")
+        train_cache = _teacher_cache(teacher, train_patches, label="train")
+        print("[train] caching teacher outputs on val pool...")
+        val_cache = _teacher_cache(teacher, val_patches, label="val")
+
+    if not train_cache or not val_cache:
+        raise SystemExit(
+            f"empty cache: train={len(train_cache)} val={len(val_cache)}"
+        )
     print(f"[train] cached: train={len(train_cache)} val={len(val_cache)}")
 
     # ----- training loop -----
